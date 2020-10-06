@@ -1,0 +1,10 @@
+.httr-oauth
+.Renviron
+.Rhistory
+.Rproj.user
+archive/
+Motivation_letters/
+fonts/
+.proj
+*.Rproj
+texput.log
