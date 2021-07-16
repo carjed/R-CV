@@ -2,7 +2,7 @@
 name: Jedidiah Carlson, Ph.D.
 position: "Population Genetics | Bioinformatics | Metaresearch"
 address: |
-         | Seattle, Washington, USA
+         | Minneapolis, Minnesota, USA
 www: jedidiahcarlson.com
 email: "jed [dot] e [dot] carlson [at] gmail [dot] com"
 twitter: jedmsp
@@ -39,13 +39,13 @@ options(gargle_oob_default = TRUE)
 
 ```{r fetch_data}
 
-cv_data_gs_id <- gs4_find("cv_data", includeTeamDriveItems=TRUE) %>% 
+cv_data_gs_id <- gs4_find("cv_data", shared_drive="GDrive") %>% 
   pull(id)
 
 sheets <- sheet_properties(cv_data_gs_id) %>% pull(name)
 
 cv_data <- set_names(sheets) %>% 
-  purrr::map(~sheets_read(cv_data_gs_id, 
+  purrr::map(~range_read(cv_data_gs_id, 
                           na="NA", 
                           col_types = c("c"), 
                           sheet = .x))
@@ -63,19 +63,24 @@ exp <- rorcid::orcid_employments("0000-0002-1363-872X") %>%
 names(exp) <- stringr::str_remove(string = names(exp), pattern = "employment-summary.") 
 
 exp %>%
-  mutate(description = 
-    "Postdoctoral mentor: Kelley Harris") %>%
-  filter(!stringr::str_detect(`role-title`, 'Teaching')) %>% 
+  # mutate(description = ifelse(grepl("Postdoctoral", `role-title`), 
+  #                             "Postdoctoral mentor: Kelley Harris", 
+  #                             NA)) %>%
+  # filter(!stringr::str_detect(`role-title`, 'Teaching')) %>% 
   detailed_entries(
     with = `role-title`,
     when = paste(
       paste(`start-date.month.value`,`start-date.year.value`, sep = '/'),
-      ifelse(is.na(`end-date`),"Present",paste(`end-date.month.value`,`end-date.year.value`, sep = ', ')),
+      ifelse(is.na(`end-date.year.value`),"Present",paste(`end-date.month.value`,`end-date.year.value`, sep = '/')),
       sep = ' - '
     ),
-    what = paste(`organization.name`, paste0("Department of ", `department-name`), sep = ' — '),
+    what = ifelse(grepl("University", `organization.name`), 
+                  paste(`organization.name`, paste0("Department of ", `department-name`), sep = ' — '), 
+                  organization.name),
     where = paste(organization.address.city, organization.address.region, sep =', '),
-    why = description
+    why = ifelse(grepl("Postdoctoral", `role-title`), 
+                              "Postdoctoral mentor: Kelley Harris", 
+                              NA)
     # .protect = FALSE
   )
 ```
@@ -91,7 +96,7 @@ cv_data$education %>%
 
 ```
 
-\faIcon*{file} Publications
+\faIcon{file} Publications
 ===========================
 
 ```{r pubs}
@@ -103,8 +108,8 @@ pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>%
   dplyr::mutate(author = author %>% 
                   as.character %>% 
                   stringr::str_trim(),
-                journal = journal %>% 
-                  replace(journal %in% "bioRxiv", "BioRxiv"), 
+                # journal = journal %>% 
+                #   replace(journal %in% "bioRxiv", "BioRxiv"), 
                 first_author = case_when(stringr::str_starts(author, "J Carlson") ~ TRUE,
                                          TRUE ~ FALSE),
                 preprint = case_when(tolower(journal)=="biorxiv" ~ TRUE,
@@ -113,9 +118,9 @@ pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>%
   mutate(author=gsub("J Carlson", "\\\\textbf{J Carlson}", author)) %>%
   mutate(author=gsub("[.]{3}", "et al", author)) %>%
   dplyr::arrange(desc(year)) %>%
-    mutate(issue=ifelse(str_length(number)>1, paste0(year, ";", number), year)) %>%
+  mutate(issue=ifelse(str_length(number)>1, paste0(year, ";", number), year)) %>%
   mutate(issue=gsub(" \\(1\\),", ":", issue)) %>%
-mutate(issue=gsub(" ", "", issue)) %>%
+  mutate(issue=gsub(" ", "", issue)) %>%
   mutate(title=tolower(title))
 
 # orcid_pubs_short <- data.frame(title=tolower(orcid_titles), doi=orcid_dois) %>%
