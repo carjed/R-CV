@@ -56,33 +56,37 @@ cv_data <- set_names(sheets) %>%
 ============================================
 
 ```{r experience}
-exp <- rorcid::orcid_employments("0000-0002-1363-872X") %>%
-  purrr::map(., purrr::pluck, "affiliation-group", "summaries") %>% 
-  purrr::flatten_dfr()
+cv_data$experience %>%
+  detailed_entries(what = company, where = loc, when = dates, with = position, why = details, .protect = FALSE)
 
-names(exp) <- stringr::str_remove(string = names(exp), pattern = "employment-summary.") 
 
-exp %>%
-  # mutate(description = ifelse(grepl("Postdoctoral", `role-title`), 
-  #                             "Postdoctoral mentor: Kelley Harris", 
-  #                             NA)) %>%
-  # filter(!stringr::str_detect(`role-title`, 'Teaching')) %>% 
-  detailed_entries(
-    with = `role-title`,
-    when = paste(
-      paste(`start-date.month.value`,`start-date.year.value`, sep = '/'),
-      ifelse(is.na(`end-date.year.value`),"Present",paste(`end-date.month.value`,`end-date.year.value`, sep = '/')),
-      sep = ' - '
-    ),
-    what = ifelse(grepl("University", `organization.name`), 
-                  paste(`organization.name`, paste0("Department of ", `department-name`), sep = ' — '), 
-                  organization.name),
-    where = paste(organization.address.city, organization.address.region, sep =', '),
-    why = ifelse(grepl("Postdoctoral", `role-title`), 
-                              "Postdoctoral mentor: Kelley Harris", 
-                              NA)
-    # .protect = FALSE
-  )
+# exp <- rorcid::orcid_employments("0000-0002-1363-872X") %>%
+#   purrr::map(., purrr::pluck, "affiliation-group", "summaries") %>% 
+#   purrr::flatten_dfr()
+# 
+# names(exp) <- stringr::str_remove(string = names(exp), pattern = "employment-summary.") 
+# 
+# exp %>%
+#   # mutate(description = ifelse(grepl("Postdoctoral", `role-title`), 
+#   #                             "Postdoctoral mentor: Kelley Harris", 
+#   #                             NA)) %>%
+#   # filter(!stringr::str_detect(`role-title`, 'Teaching')) %>% 
+#   detailed_entries(
+#     with = `role-title`,
+#     when = paste(
+#       paste(`start-date.month.value`,`start-date.year.value`, sep = '/'),
+#       ifelse(is.na(`end-date.year.value`),"Present",paste(`end-date.month.value`,`end-date.year.value`, sep = '/')),
+#       sep = ' - '
+#     ),
+#     what = ifelse(grepl("University", `organization.name`), 
+#                   paste(`organization.name`, paste0("Department of ", `department-name`), sep = ' — '), 
+#                   organization.name),
+#     where = paste(organization.address.city, organization.address.region, sep =', '),
+#     why = ifelse(grepl("Postdoctoral", `role-title`), 
+#                               "Postdoctoral mentor: Kelley Harris", 
+#                               NA)
+#     # .protect = FALSE
+#   )
 ```
 
 \faIcon{university} Education
@@ -100,11 +104,29 @@ cv_data$education %>%
 ===========================
 
 ```{r pubs}
-orcid_pubs <- rorcid::works(rorcid::orcid_id("0000-0002-1363-872X"))  
+orcid_pubs <- rorcid::works(rorcid::orcid_id("0000-0002-1363-872X")) %>% 
+  as_tibble() %>% 
+  janitor::clean_names() %>%
+  tidyr::unnest(external_ids_external_id) %>%
+  janitor::clean_names()
+
+orcid_pubs_clean <- orcid_pubs %>% 
+  dplyr::filter(grepl("Elsevier", source_source_name_value) & 
+                  display_index > 0 & 
+                  external_id_type == "doi") %>%
+  mutate(title=tolower(title_title_value)) %>%
+  mutate(title_cap=title_title_value) %>%
+  mutate(journal=gsub("&", "\\\\&", journal_title_value)) %>%
+  mutate(url=paste0("http://dx.doi.org/", external_id_value)) %>%
+  mutate(publication_date_year_value=as.numeric(publication_date_year_value)) %>%
+  dplyr::select(title, title_cap=title_title_value, journal, year=publication_date_year_value, doi=external_id_value, url)
+  
+
 orcid_titles <- orcid_pubs$title.title.value
 orcid_dois <- unlist(lapply(orcid_pubs$`external-ids.external-id`, function(x) x$`external-id-value`[[1]]))
 
-pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>% 
+# query from google scholar to get full author lists
+gs_pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>% 
   dplyr::mutate(author = author %>% 
                   as.character %>% 
                   stringr::str_trim(),
@@ -121,7 +143,67 @@ pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>%
   mutate(issue=ifelse(str_length(number)>1, paste0(year, ";", number), year)) %>%
   mutate(issue=gsub(" \\(1\\),", ":", issue)) %>%
   mutate(issue=gsub(" ", "", issue)) %>%
-  mutate(title=tolower(title))
+  mutate(title=tolower(title)) %>%
+  dplyr::select(author, title)
+
+
+fmt_biorxiv <- function(dois){
+  json_data <- lapply(dois, function(x) jsonlite::fromJSON(paste0("https://api.biorxiv.org/details/biorxiv/", x)))
+  doi_df <- lapply(json_data, `[[`, 2) %>% 
+    reduce(bind_rows) %>% 
+    group_by(doi) %>% 
+    arrange(desc(version)) %>% 
+    slice(1L) %>% 
+    mutate(year=as.numeric(substr(date, 1, 4)), 
+           url=paste0("http://dx.doi.org/", doi), 
+           title_cap=title) %>% 
+    dplyr::select(title, title_cap, journal=server, year, doi, url, author=authors)
+  
+  name_splits <- lapply(strsplit(doi_df$author, ";"), function(x) strsplit(x, ","))
+  ns_df_list <- lapply(name_splits, data.frame)
+  
+  # process first initials
+  firstnames <- lapply(ns_df_list, function(x) x[2,])
+  
+  # remove spaces/punctuation
+  firstnames <- lapply(firstnames, function(x) gsub("[[:punct:]]\\s*", "", unlist(x)))
+  
+  # remove leading spaces
+  firstnames <- lapply(firstnames, function(x) gsub("^\\s", "", x))
+  
+  # process surnames
+  lastnames <- lapply(ns_df_list, function(x) x[1,])
+  lastnames <- lapply(lastnames, unlist)
+  
+  # merge initials + surnames
+  firstlast <- mapply(function(x,y) paste0(x, " ", y), firstnames, lastnames, SIMPLIFY=FALSE)
+  firstlast <- lapply(firstlast, function(x) x[1:6])
+  firstlast <- lapply(firstlast, function(x) x[!is.na(x)])
+  firstlast <- lapply(firstlast, function(x) paste(x, collapse=", "))
+  
+  
+  doi_df$author <- unlist(firstlast)
+  
+  doi_df <- doi_df %>%
+    mutate(author=gsub("J Carlson", "\\\\textbf{J Carlson}", author)) %>%
+    mutate(author=gsub("[\\s]{2,}", "\\s", author)) %>%
+    mutate(author=ifelse(str_count(author, ",")==5, paste0(author, ", et al"), author))
+  
+  return(doi_df)
+}
+
+biorxiv_dois <- c("10.1101/2021.08.30.458162", "10.1101/2021.09.19.460985")
+pubs_biorxiv <- fmt_biorxiv(biorxiv_dois)
+
+left_join(orcid_pubs_clean, gs_pubs) %>%
+  bind_rows(pubs_biorxiv) %>%
+  mutate(journal_it=paste0("\\textit{", journal, "}")) %>%
+  mutate(bib=paste0(paste(author, title_cap, journal_it, paste0("(", year, ")"), paste0("\\href{", url, "}{[doi:", doi, "]}"), sep=". "), ".")) %>%
+  arrange(desc(year)) %>%
+  detailed_entries(
+    why = bib,
+    .protect=FALSE)
+  
 
 # orcid_pubs_short <- data.frame(title=tolower(orcid_titles), doi=orcid_dois) %>%
 #   mutate(doi_http=paste0("https://doi.org/", doi))
@@ -145,38 +227,37 @@ pubs <- scholar::get_publications("4o1Dm1YAAAAJ") %>%
 #     why = bib,
 #     .protect=FALSE)
 
-cr_pubs <- rcrossref::cr_works(dois=orcid_dois)
-
-cr_pubs$data %>%
-  mutate(journal=ifelse(grepl("10.1101", doi), "bioRxiv", container.title)) %>%
-  # mutate(page=ifelse(is.na(page), page, paste0(""))) %>%
-  # mutate(issue=paste0(volume, ";")
-  unnest(author) %>% 
-  dplyr::filter(!is.na(given)) %>%
-  group_by(title, journal, created, url, doi) %>%
-  dplyr::slice_head(n=6) %>%
-  mutate(given=gsub("[[:lower:][:space:][:punct:]]", "", given)) %>%
-  mutate(author=paste0(family, " ", given)) %>%
-  summarise(author_list=paste(author, collapse=", ")) %>%
-  mutate(author_list=ifelse(str_count(author_list, ",") < 5, author_list, paste0(author_list, ", et al"))) %>%
-  mutate(year=substr(created, 1, 4)) %>%
-  # dplyr::select(title, journal, year, author_list) %>%
-  mutate(author_list=gsub("Carlson J", "\\\\textbf{Carlson J}", author_list)) %>%
-  mutate(journal=gsub("&", "\\\\&", journal)) %>%
-  mutate(journal_it=paste0("\\textit{", journal, "}")) %>%
-  mutate(bib=paste0(paste(author_list, title, journal_it, paste0("(", year, ")"), paste0("\\href{", url, "}{[doi:", doi, "]}"), sep=". "), ".")) %>%
-  arrange(desc(created)) %>%
-  detailed_entries(
-    #with = title,
-    #what = journal,
-    # when = year,
-    #where = year,
-    why = bib,
-    .protect=FALSE)
+# cr_pubs <- rcrossref::cr_works(dois=orcid_dois)
+# 
+# cr_pubs$data %>%
+#   mutate(journal=ifelse(grepl("10.1101", doi), "bioRxiv", container.title)) %>%
+#   # mutate(page=ifelse(is.na(page), page, paste0(""))) %>%
+#   # mutate(issue=paste0(volume, ";")
+#   unnest(author) %>% 
+#   dplyr::filter(!is.na(given)) %>%
+#   group_by(title, journal, created, url, doi) %>%
+#   dplyr::slice_head(n=6) %>%
+#   mutate(given=gsub("[[:lower:][:space:][:punct:]]", "", given)) %>%
+#   mutate(author=paste0(family, " ", given)) %>%
+#   summarise(author_list=paste(author, collapse=", ")) %>%
+#   mutate(author_list=ifelse(str_count(author_list, ",") < 5, author_list, paste0(author_list, ", et al"))) %>%
+#   mutate(year=substr(created, 1, 4)) %>%
+#   # dplyr::select(title, journal, year, author_list) %>%
+#   mutate(author_list=gsub("Carlson J", "\\\\textbf{Carlson J}", author_list)) %>%
+#   mutate(journal=gsub("&", "\\\\&", journal)) %>%
+#   mutate(journal_it=paste0("\\textit{", journal, "}")) %>%
+#   mutate(bib=paste0(paste(author_list, title, journal_it, paste0("(", year, ")"), paste0("\\href{", url, "}{[doi:", doi, "]}"), sep=". "), ".")) %>%
+#   arrange(desc(created)) %>%
+#   detailed_entries(
+#     #with = title,
+#     #what = journal,
+#     # when = year,
+#     #where = year,
+#     why = bib,
+#     .protect=FALSE)
 
 ```
 
-<!-- \pagebreak -->
 
 \faIcon{dollar-sign} Research Funding
 ===============================
@@ -187,6 +268,8 @@ cv_data$funding %>%
   detailed_entries(what = source, when = date, with = title, .protect = FALSE)
 
 ```
+
+<!-- \pagebreak -->
 
 \faIcon{comments} Conferences Presentations and Invited Talks
 ================================
@@ -209,6 +292,8 @@ cv_data$teaching %>%
   detailed_entries(with = title, what = type, where = location, when = date, .protect=FALSE)
 ```
 
+<!-- \pagebreak -->
+
 \faIcon{medal} Honors and Awards
 ===============================
 
@@ -229,15 +314,15 @@ cv_data$service %>%
 
 ```
 
-\faIcon{users} Memberships
-===============================
+<!-- \faIcon{users} Professional Organizations -->
+<!-- =============================== -->
 
-```{r orgs}
+<!-- ```{r orgs} -->
 
-cv_data$orgs %>%
-  detailed_entries(what = org, when = date, .protect = FALSE)
+<!-- cv_data$orgs %>% -->
+<!--   detailed_entries(what = org, when = date, .protect = FALSE) -->
 
-```
+<!-- ``` -->
 
 \faIcon{newspaper} Media
 ==============================
