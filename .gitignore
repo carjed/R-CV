@@ -8,3 +8,5 @@ fonts/
 .proj
 *.Rproj
 texput.log
+*.aux
+*.out

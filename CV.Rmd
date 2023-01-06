@@ -13,13 +13,14 @@ headcolor: 16690d
 date: "`r format(Sys.time(), '%B %Y')`"
 output: 
   vitae::awesomecv:
+    show_footer: true
 always_allow_html: yes
 header-includes:
-  \usepackage{multicol}
-  \usepackage{colortbl}
-  \arrayrulecolor{white}
-  \usepackage{hhline}
-  \definecolor{light-gray}{gray}{0.95}
+  - \usepackage{multicol}
+  - \usepackage{colortbl}
+  - \arrayrulecolor{white}
+  - \usepackage{hhline}
+  - \definecolor{light-gray}{gray}{0.95}
 ---
 
 ```{r setup, include=FALSE}
@@ -59,8 +60,11 @@ cv_data <- set_names(sheets) %>%
 
 ```{r experience}
 cv_data$experience %>%
-  # detailed_entries(what = company, where = loc, when = dates, with = position, why = details_long, .protect = FALSE)
-  detailed_entries(what = company, when = dates, with = position, why = details, .protect = FALSE)
+  # detailed_entries(what = company, where = loc, when = dates, with = position, why = details_long, .protect = FALSE) %>%
+  detailed_entries(what = company, when = dates, with = position, .protect = FALSE)
+  # group_by(what) %>%
+  # slice(1L)
+  # arrange(desc(when))
 
 
 # exp <- rorcid::orcid_employments("0000-0002-1363-872X") %>%
